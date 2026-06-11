@@ -1,5 +1,5 @@
 const express = require('express');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const fs = require('fs');
 const app = express();
 app.use(express.json());
@@ -18,19 +18,23 @@ app.get('/audio', (req, res) => {
   if (!title) return res.status(400).send('title required');
 
   const query = `${title} ${artist || ''}`;
-  const tmpFile = `/tmp/${Date.now()}.m4a`;
+  const tmpFile = `/tmp/${Date.now()}.webm`;
   console.log(`Downloading: ${query}`);
 
-  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "bestaudio/best" --no-playlist --no-warnings -o "${tmpFile}"`;
+  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "251/bestaudio" --no-playlist --no-warnings -o "${tmpFile}"`;
 
   exec(command, { timeout: 60000 }, (error) => {
     if (error || !fs.existsSync(tmpFile)) {
-      console.error('Failed:', error?.message?.substring(0, 150));
+      console.error('Failed:', error?.message?.substring(0, 200));
       return res.status(404).send('not found');
     }
 
-    console.log(`Serving: ${title}`);
-    res.setHeader('Content-Type', 'audio/mp4');
+    const stat = fs.statSync(tmpFile);
+    console.log(`Serving ${title}, size: ${stat.size}`);
+    
+    res.setHeader('Content-Type', 'audio/webm');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
     
     const stream = fs.createReadStream(tmpFile);
@@ -44,7 +48,6 @@ app.post('/stream', (req, res) => {
   const { title, artist } = req.body;
   if (!title) return res.status(400).json({ error: 'title required' });
   const audioUrl = `${req.protocol}://${req.get('host')}/audio?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist || '')}`;
-  console.log(`Stream URL for: ${title}`);
   res.json({ url: audioUrl });
 });
 
