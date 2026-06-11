@@ -1,5 +1,5 @@
 const express = require('express');
-const { exec, spawn } = require('child_process');
+const { exec } = require('child_process');
 const fs = require('fs');
 const app = express();
 app.use(express.json());
@@ -18,29 +18,34 @@ app.get('/audio', (req, res) => {
   if (!title) return res.status(400).send('title required');
 
   const query = `${title} ${artist || ''}`;
-  const tmpFile = `/tmp/${Date.now()}.webm`;
+  const tmpFile = `/tmp/${Date.now()}.m4a`;
   console.log(`Downloading: ${query}`);
 
-  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "251/bestaudio" --no-playlist --no-warnings -o "${tmpFile}"`;
+  // yt-dlp + ffmpeg تبدیل به m4a که iOS پشتیبانی میکنه
+  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "bestaudio" --extract-audio --audio-format m4a --audio-quality 128K --no-playlist --no-warnings -o "${tmpFile}"`;
 
-  exec(command, { timeout: 60000 }, (error) => {
-    if (error || !fs.existsSync(tmpFile)) {
+  exec(command, { timeout: 90000 }, (error) => {
+    // فایل ممکنه با extension متفاوت ذخیره شده باشه
+    const possibleFiles = [tmpFile, tmpFile.replace('.m4a', '.m4a.m4a'), tmpFile.replace('.m4a', '')];
+    const actualFile = possibleFiles.find(f => fs.existsSync(f));
+    
+    if (error || !actualFile) {
       console.error('Failed:', error?.message?.substring(0, 200));
       return res.status(404).send('not found');
     }
 
-    const stat = fs.statSync(tmpFile);
+    const stat = fs.statSync(actualFile);
     console.log(`Serving ${title}, size: ${stat.size}`);
     
-    res.setHeader('Content-Type', 'audio/webm');
+    res.setHeader('Content-Type', 'audio/mp4');
     res.setHeader('Content-Length', stat.size);
     res.setHeader('Accept-Ranges', 'bytes');
     res.setHeader('Access-Control-Allow-Origin', '*');
     
-    const stream = fs.createReadStream(tmpFile);
+    const stream = fs.createReadStream(actualFile);
     stream.pipe(res);
-    stream.on('end', () => fs.unlink(tmpFile, () => {}));
-    req.on('close', () => { try { fs.unlink(tmpFile, () => {}); } catch(e) {} });
+    stream.on('end', () => fs.unlink(actualFile, () => {}));
+    req.on('close', () => { try { fs.unlink(actualFile, () => {}); } catch(e) {} });
   });
 });
 
