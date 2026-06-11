@@ -1,7 +1,6 @@
 const express = require('express');
 const { exec } = require('child_process');
 const fs = require('fs');
-const path = require('path');
 const app = express();
 app.use(express.json());
 
@@ -14,31 +13,30 @@ if (process.env.YOUTUBE_COOKIES) {
 
 const cookieArg = () => fs.existsSync(cookieFile) ? `--cookies ${cookieFile}` : '';
 
-// دانلود و serve به عنوان mp3
 app.get('/audio', (req, res) => {
   const { title, artist } = req.query;
   if (!title) return res.status(400).send('title required');
 
   const query = `${title} ${artist || ''}`;
-  const tmpFile = `/tmp/${Date.now()}.mp3`;
+  const tmpFile = `/tmp/${Date.now()}.m4a`;
   console.log(`Downloading: ${query}`);
 
-  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format bestaudio --extract-audio --audio-format mp3 --audio-quality 128K --no-playlist --no-warnings -o "${tmpFile}"`;
+  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "bestaudio/best" --no-playlist --no-warnings -o "${tmpFile}"`;
 
   exec(command, { timeout: 60000 }, (error) => {
     if (error || !fs.existsSync(tmpFile)) {
-      console.error('Download failed:', error?.message);
+      console.error('Failed:', error?.message?.substring(0, 150));
       return res.status(404).send('not found');
     }
 
-    res.setHeader('Content-Type', 'audio/mpeg');
+    console.log(`Serving: ${title}`);
+    res.setHeader('Content-Type', 'audio/mp4');
     res.setHeader('Access-Control-Allow-Origin', '*');
     
     const stream = fs.createReadStream(tmpFile);
     stream.pipe(res);
-    stream.on('end', () => {
-      fs.unlink(tmpFile, () => {});
-    });
+    stream.on('end', () => fs.unlink(tmpFile, () => {}));
+    req.on('close', () => { try { fs.unlink(tmpFile, () => {}); } catch(e) {} });
   });
 });
 
@@ -46,6 +44,7 @@ app.post('/stream', (req, res) => {
   const { title, artist } = req.body;
   if (!title) return res.status(400).json({ error: 'title required' });
   const audioUrl = `${req.protocol}://${req.get('host')}/audio?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist || '')}`;
+  console.log(`Stream URL for: ${title}`);
   res.json({ url: audioUrl });
 });
 
