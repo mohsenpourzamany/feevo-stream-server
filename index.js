@@ -1,17 +1,27 @@
 const express = require('express');
 const { exec } = require('child_process');
+const fs = require('fs');
 const app = express();
 app.use(express.json());
+
+// Cookie رو از env variable بخون و فایل بساز
+const cookieFile = '/tmp/yt_cookies.txt';
+if (process.env.YOUTUBE_COOKIES) {
+  const decoded = Buffer.from(process.env.YOUTUBE_COOKIES, 'base64').toString('utf8');
+  fs.writeFileSync(cookieFile, decoded);
+  console.log('YouTube cookies loaded');
+}
 
 app.post('/stream', async (req, res) => {
   try {
     const { title, artist } = req.body;
     if (!title) return res.status(400).json({ error: 'title required' });
 
-    const query = `${title} ${artist} official audio`;
+    const query = `${title} ${artist}`;
     console.log(`Searching: ${query}`);
 
-    const command = `yt-dlp "ytsearch1:${query}" --get-url --format bestaudio --no-playlist --no-warnings`;
+    const cookieArg = fs.existsSync(cookieFile) ? `--cookies ${cookieFile}` : '';
+    const command = `yt-dlp ${cookieArg} "ytsearch1:${query}" --get-url --format bestaudio --no-playlist --no-warnings`;
     
     exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
       if (error) {
