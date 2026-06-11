@@ -1,9 +1,7 @@
 const express = require('express');
-const YTDlpWrap = require('yt-dlp-wrap').default;
+const { exec } = require('child_process');
 const app = express();
 app.use(express.json());
-
-const ytDlp = new YTDlpWrap();
 
 app.post('/stream', async (req, res) => {
   try {
@@ -13,18 +11,20 @@ app.post('/stream', async (req, res) => {
     const query = `${title} ${artist} official audio`;
     console.log(`Searching: ${query}`);
 
-    const results = await ytDlp.execPromise([
-      `ytsearch1:${query}`,
-      '--get-url',
-      '--format', 'bestaudio',
-      '--no-playlist',
-    ]);
-
-    const url = results.trim().split('\n')[0];
-    if (!url) return res.status(404).json({ error: 'not found' });
-
-    console.log(`Found: ${url.substring(0, 80)}...`);
-    res.json({ url });
+    const command = `yt-dlp "ytsearch1:${query}" --get-url --format bestaudio --no-playlist --no-warnings`;
+    
+    exec(command, { timeout: 30000 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('yt-dlp error:', error.message);
+        return res.status(404).json({ error: 'not found' });
+      }
+      
+      const url = stdout.trim().split('\n')[0];
+      if (!url) return res.status(404).json({ error: 'no url' });
+      
+      console.log(`Found URL for: ${title}`);
+      res.json({ url });
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: String(e) });
@@ -34,4 +34,4 @@ app.post('/stream', async (req, res) => {
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => console.log(`Server on port ${PORT}`));
