@@ -1,6 +1,7 @@
 const express = require('express');
 const { exec } = require('child_process');
 const fs = require('fs');
+const path = require('path');
 const app = express();
 app.use(express.json());
 
@@ -12,48 +13,47 @@ if (process.env.YOUTUBE_COOKIES) {
 }
 
 const cookieArg = () => fs.existsSync(cookieFile) ? `--cookies ${cookieFile}` : '';
+const cache = {};
 
-app.get('/audio', (req, res) => {
-  const { title, artist } = req.query;
-  if (!title) return res.status(400).send('title required');
+app.post('/stream', async (req, res) => {
+  const { title, artist } = req.body;
+  if (!title) return res.status(400).json({ error: 'title required' });
+
+  const key = `${title}-${artist}`.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  const cacheFile = `/tmp/${key}.m4a`;
+
+  // اگه cache داریم سریع جواب بده
+  if (fs.existsSync(cacheFile)) {
+    console.log(`Cache hit: ${title}`);
+    return res.json({ url: `${req.protocol}://${req.get('host')}/file/${key}` });
+  }
 
   const query = `${title} ${artist || ''}`;
-  const tmpFile = `/tmp/${Date.now()}.m4a`;
   console.log(`Downloading: ${query}`);
 
-  // yt-dlp + ffmpeg تبدیل به m4a که iOS پشتیبانی میکنه
-  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "bestaudio" --extract-audio --audio-format m4a --audio-quality 128K --no-playlist --no-warnings -o "${tmpFile}"`;
+  const command = `yt-dlp ${cookieArg()} "ytsearch1:${query}" --format "bestaudio" --extract-audio --audio-format m4a --audio-quality 128K --no-playlist --no-warnings -o "${cacheFile}"`;
 
   exec(command, { timeout: 90000 }, (error) => {
-    // فایل ممکنه با extension متفاوت ذخیره شده باشه
-    const possibleFiles = [tmpFile, tmpFile.replace('.m4a', '.m4a.m4a'), tmpFile.replace('.m4a', '')];
-    const actualFile = possibleFiles.find(f => fs.existsSync(f));
-    
-    if (error || !actualFile) {
-      console.error('Failed:', error?.message?.substring(0, 200));
-      return res.status(404).send('not found');
+    if (error || !fs.existsSync(cacheFile)) {
+      console.error('Failed:', error?.message?.substring(0, 150));
+      return res.status(404).json({ error: 'not found' });
     }
-
-    const stat = fs.statSync(actualFile);
-    console.log(`Serving ${title}, size: ${stat.size}`);
-    
-    res.setHeader('Content-Type', 'audio/mp4');
-    res.setHeader('Content-Length', stat.size);
-    res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    
-    const stream = fs.createReadStream(actualFile);
-    stream.pipe(res);
-    stream.on('end', () => fs.unlink(actualFile, () => {}));
-    req.on('close', () => { try { fs.unlink(actualFile, () => {}); } catch(e) {} });
+    console.log(`Ready: ${title}`);
+    res.json({ url: `${req.protocol}://${req.get('host')}/file/${key}` });
   });
 });
 
-app.post('/stream', (req, res) => {
-  const { title, artist } = req.body;
-  if (!title) return res.status(400).json({ error: 'title required' });
-  const audioUrl = `${req.protocol}://${req.get('host')}/audio?title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist || '')}`;
-  res.json({ url: audioUrl });
+// Serve فایل کامل
+app.get('/file/:key', (req, res) => {
+  const cacheFile = `/tmp/${req.params.key}.m4a`;
+  if (!fs.existsSync(cacheFile)) return res.status(404).send('not found');
+  
+  const stat = fs.statSync(cacheFile);
+  res.setHeader('Content-Type', 'audio/mp4');
+  res.setHeader('Content-Length', stat.size);
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  fs.createReadStream(cacheFile).pipe(res);
 });
 
 app.get('/health', (_, res) => res.json({ status: 'ok' }));
